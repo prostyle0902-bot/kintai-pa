@@ -223,6 +223,7 @@
     let todayIn = null;
     let todayOut = null;
     let prevDayNoOut = false;
+    let crossDayDate = null;
     let applyType = '出勤';
 
     function pinInput(n) {
@@ -270,6 +271,11 @@
             if (res.inTime) { todayIn = res.inTime; document.getElementById('btn-in').disabled = true; }
             if (res.outTime) { todayOut = res.outTime; document.getElementById('btn-out').disabled = true; }
             prevDayNoOut = res.prevDayNoOut || false;
+            if (res.crossDay && !res.inTime) {
+              crossDayDate = res.crossDayDate;
+              document.getElementById('btn-in').disabled = true;
+              document.getElementById('btn-out').disabled = false;
+            }
             updateStatus();
           }
         })
@@ -313,8 +319,8 @@
     }
 
     function punch(type) {
-      // 退勤：出勤未打刻チェック
-      if (type === '退勤' && !todayIn) {
+      // 退勤：出勤未打刻チェック（日またぎの場合はスキップ）
+      if (type === '退勤' && !todayIn && !crossDayDate) {
         if (!confirm('⚠️ 出勤が記録されていません。\n打刻忘れ申請画面に移動しますか？')) return;
         showApply(); return;
       }
@@ -371,7 +377,8 @@
       showScreen('screen-done');
 
       const d = new Date();
-      const dateStr = d.getFullYear() + '/' + String(d.getMonth()+1).padStart(2,'0') + '/' + String(d.getDate()).padStart(2,'0');
+      const todayStr = d.getFullYear() + '/' + String(d.getMonth()+1).padStart(2,'0') + '/' + String(d.getDate()).padStart(2,'0');
+      const dateStr = (type === '退勤' && crossDayDate) ? crossDayDate : todayStr;
       fetch(GAS_URL, {
         method: 'POST', mode: 'cors',
         headers: { 'Content-Type': 'text/plain' },
@@ -458,7 +465,7 @@
     }
 
     function logout() {
-      currentEmp = null; pinBuffer = ''; todayIn = null; todayOut = null; prevDayNoOut = false;
+      currentEmp = null; pinBuffer = ''; todayIn = null; todayOut = null; prevDayNoOut = false; crossDayDate = null;
       updateDots();
       document.getElementById('pin-error').textContent = '';
       showScreen('screen-pin');
