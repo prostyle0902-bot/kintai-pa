@@ -61,7 +61,6 @@
     .status-box { background: #f9f9f7; border-radius: var(--radius-md); padding: 12px 16px; font-size: 13px; }
     .status-row { display: flex; justify-content: space-between; color: var(--text-secondary); padding: 4px 0; }
     .status-row span:last-child { color: var(--text-primary); font-weight: 500; }
-    /* 休憩ボックス */
     .break-box { display: none; background: var(--surface); border: 0.5px solid var(--border); border-radius: var(--radius-lg); padding: 1rem 1.25rem; margin-top: 1rem; }
     .break-box.visible { display: block; }
     .break-label { font-size: 13px; color: var(--text-secondary); margin-bottom: 8px; }
@@ -70,7 +69,6 @@
     .break-btn { height: 48px; border-radius: var(--radius-md); font-size: 14px; font-weight: 600; cursor: pointer; border: 1.5px solid var(--border-md); background: #f9f9f7; color: var(--text-secondary); transition: all 0.15s; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
     .break-btn:active { transform: scale(0.94); }
     .break-btn.selected { background: var(--accent); color: #fff; border-color: var(--accent); }
-    /* 有給・申請・ログアウトボタン */
     .yukyu-btn { width: 100%; margin-top: 1rem; padding: 14px; border: none; border-radius: var(--radius-lg); background: #FFE0B2; color: #E65100; font-size: 15px; font-weight: 600; cursor: pointer; display: none; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
     .yukyu-btn.visible { display: block; }
     .apply-btn { width: 100%; margin-top: 1rem; padding: 11px; border: 0.5px solid #d4a017; border-radius: var(--radius-md); background: #fffbeb; color: #92650a; font-size: 13px; cursor: pointer; }
@@ -137,7 +135,6 @@
           <div class="status-row"><span>本日の出勤</span><span id="st-in">未打刻</span></div>
           <div class="status-row"><span>本日の退勤</span><span id="st-out">未打刻</span></div>
         </div>
-        <!-- 休憩時間ボックス（十三里屋のみ表示） -->
         <div class="break-box" id="break-box">
           <div class="break-label">☕ 休憩時間を選んでください</div>
           <div class="break-selected" id="break-selected"></div>
@@ -189,8 +186,8 @@
   </div>
 
   <script>
- 　 const GAS_URL = 'https://script.google.com/macros/s/AKfycbylaRGqV8Ij1p1X4Qx1y7jn1r8jqQOz3lCQSHMOnudLFxxfawlMOtVm5trQEZTz9aINHw/exec';
-    
+    const GAS_URL = 'https://script.google.com/macros/s/AKfycbylaRGqV8Ij1p1X4Qx1y7jn1r8jqQOz3lCQSHMOnudLFxxfawlMOtVm5trQEZTz9aINHw/exec';
+
     const employees = [
       { pin: '2824', name: '小林メグ',    dept: '焼きたて屋',         locs: [{ lat: 35.9831, lng: 140.6368, name: '焼きたて屋', radius: 300 }] },
       { pin: '1409', name: '荒宏信',      dept: '焼きたて屋',         locs: [{ lat: 35.9831, lng: 140.6368, name: '焼きたて屋', radius: 300 }] },
@@ -240,17 +237,49 @@
       { pin: '4150', name: '三浦達弥',    dept: '本社',               locs: [{ lat: 35.8580, lng: 140.5625, name: '本社', radius: 300 }] },
     ];
 
-    const YUKYU_MEMBERS  = ['河野千恵子','橋本房枝','山本里奈','長谷川碧里','松本めぐみ','田村あつ子','衣幡千明'];
-    const BREAK_MEMBERS  = ['八木秀子','籾山結泉','下河邊なお子','小堀真桜'];
+    const YUKYU_MEMBERS = ['河野千恵子','橋本房枝','山本里奈','長谷川碧里','松本めぐみ','田村あつ子','衣幡千明'];
+    const BREAK_MEMBERS = ['八木秀子','籾山結泉','下河邊なお子','小堀真桜'];
 
-    let pinBuffer    = '';
-    let currentEmp   = null;
-    let todayIn      = null;
-    let todayOut     = null;
-    let prevDayNoOut = false;
-    let crossDayDate = null;
-    let applyType    = '出勤';
+    let pinBuffer     = '';
+    let currentEmp    = null;
+    let todayIn       = null;
+    let todayOut      = null;
+    let prevDayNoOut  = false;
+    let crossDayDate  = null;
+    let applyType     = '出勤';
     let selectedBreak = null;
+    let businessDateStr = ''; // 業務日付（5時基準）
+
+    // ★ 業務時間の概念：0:00〜4:59は前日扱い
+    function getBusinessDate() {
+      const now = new Date();
+      const h = now.getHours();
+      if (h < 5) {
+        const prev = new Date(now);
+        prev.setDate(prev.getDate() - 1);
+        return prev;
+      }
+      return now;
+    }
+
+    function getDateStr(d) {
+      return d.getFullYear() + '/' + String(d.getMonth()+1).padStart(2,'0') + '/' + String(d.getDate()).padStart(2,'0');
+    }
+
+    // ★ 業務時刻文字列（0:00〜4:59は24:00〜28:59として返す）
+    function getBusinessTimeStr(type) {
+      const now = new Date();
+      let h = now.getHours();
+      let m = now.getMinutes();
+      if (h < 5) h += 24;
+      if (type === '出勤') {
+        m = Math.ceil(m / 15) * 15;
+        if (m === 60) { m = 0; h += 1; }
+      } else {
+        m = Math.floor(m / 15) * 15;
+      }
+      return String(h).padStart(2,'0') + ':' + String(m).padStart(2,'0');
+    }
 
     function pinInput(n) {
       if (pinBuffer.length >= 4) return;
@@ -303,13 +332,13 @@
         updateStatus();
         showScreen('screen-punch');
 
-        // ログイン時に打刻状況取得
-        const d = new Date();
-        const dateStr = d.getFullYear() + '/' + String(d.getMonth()+1).padStart(2,'0') + '/' + String(d.getDate()).padStart(2,'0');
+        // ★ 業務日付を取得（0〜4時なら前日）
+        businessDateStr = getDateStr(getBusinessDate());
+
         fetch(GAS_URL, {
           method: 'POST', mode: 'cors',
           headers: { 'Content-Type': 'text/plain' },
-          body: JSON.stringify({ action: 'getStatusPA', name: emp.name, date: dateStr }),
+          body: JSON.stringify({ action: 'getStatusPA', name: emp.name, date: businessDateStr }),
         })
         .then(r => r.json())
         .then(res => {
@@ -322,7 +351,6 @@
               document.getElementById('btn-in').disabled  = true;
               document.getElementById('btn-out').disabled = false;
             }
-            // 既存の休憩時間を取得して表示
             if (res.breakTime && BREAK_MEMBERS.includes(emp.name)) {
               selectedBreak = res.breakTime;
               document.getElementById('break-selected').textContent = '現在の設定: ' + res.breakTime + '分';
@@ -347,25 +375,14 @@
       document.querySelectorAll('.break-btn').forEach(b => {
         b.classList.toggle('selected', parseInt(b.textContent) === minutes);
       });
-
-      // GASに休憩時間を送信
-      const d = new Date();
-      const dateStr = d.getFullYear() + '/' + String(d.getMonth()+1).padStart(2,'0') + '/' + String(d.getDate()).padStart(2,'0');
       fetch(GAS_URL, {
         method: 'POST', mode: 'cors',
         headers: { 'Content-Type': 'text/plain' },
-        body: JSON.stringify({
-          action: 'setBreak',
-          name: currentEmp.name,
-          date: dateStr,
-          breakTime: minutes,
-        }),
+        body: JSON.stringify({ action: 'setBreak', name: currentEmp.name, date: businessDateStr, breakTime: minutes }),
       })
       .then(r => r.json())
       .then(res => {
-        if (res.status !== 'ok') {
-          alert('休憩時間の保存に失敗しました');
-        }
+        if (res.status !== 'ok') alert('休憩時間の保存に失敗しました');
       })
       .catch(() => {});
     }
@@ -373,19 +390,6 @@
     function showScreen(id) {
       document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
       document.getElementById(id).classList.add('active');
-    }
-
-    function getTimeStr(type) {
-      const now = new Date();
-      let h = now.getHours();
-      let m = now.getMinutes();
-      if (type === '出勤') {
-        m = Math.ceil(m / 15) * 15;
-        if (m === 60) { m = 0; h += 1; }
-      } else {
-        m = Math.floor(m / 15) * 15;
-      }
-      return String(h).padStart(2,'0') + ':' + String(m).padStart(2,'0');
     }
 
     function updateStatus() {
@@ -448,25 +452,38 @@
     }
 
     function doPunch(type, geoInfo) {
-      const t = getTimeStr(type);
-      if (type === '出勤') { todayIn  = t; document.getElementById('btn-in').disabled  = true; }
-      else                 { todayOut = t; document.getElementById('btn-out').disabled = true; }
+      // ★ 業務時刻を使う（0〜4時は24〜28時台）
+      const t = getBusinessTimeStr(type);
+
+      if (type === '出勤') {
+        todayIn = t;
+        document.getElementById('btn-in').disabled = true;
+        // ★ 出勤打刻時の業務日付を固定
+        businessDateStr = getDateStr(getBusinessDate());
+      } else {
+        todayOut = t;
+        document.getElementById('btn-out').disabled = true;
+      }
+
       updateStatus();
       document.getElementById('done-title').textContent = type + 'を記録しました';
       document.getElementById('done-time').textContent  = '記録時刻: ' + t;
       document.getElementById('done-icon').textContent  = type === '出勤' ? '✅' : '🏁';
       showScreen('screen-done');
 
-      const d = new Date();
-      const todayStr = d.getFullYear() + '/' + String(d.getMonth()+1).padStart(2,'0') + '/' + String(d.getDate()).padStart(2,'0');
-      const dateStr = (type === '退勤' && crossDayDate) ? crossDayDate : todayStr;
+      // ★ 日付は businessDateStr（出勤した業務日付）を使う
+      const dateStr = (type === '退勤' && crossDayDate) ? crossDayDate : businessDateStr;
+
       fetch(GAS_URL, {
         method: 'POST', mode: 'cors',
         headers: { 'Content-Type': 'text/plain' },
         body: JSON.stringify({
           action: 'punchPA',
-          date: dateStr, name: currentEmp.name, dept: currentEmp.dept,
-          type: type, time: t,
+          date: dateStr,
+          name: currentEmp.name,
+          dept: currentEmp.dept,
+          type: type,
+          time: t,
           lat:   geoInfo ? geoInfo.lat   : null,
           lng:   geoInfo ? geoInfo.lng   : null,
           place: geoInfo ? geoInfo.place : 'フリー',
@@ -476,12 +493,10 @@
       .then(res => {
         if (res.status === 'duplicate') {
           if (confirm('⚠️ ' + res.message + '\n上書きしますか？')) {
-            const d2  = new Date();
-            const ds2 = d2.getFullYear() + '/' + String(d2.getMonth()+1).padStart(2,'0') + '/' + String(d2.getDate()).padStart(2,'0');
             fetch(GAS_URL, {
               method: 'POST', mode: 'cors',
               headers: { 'Content-Type': 'text/plain' },
-              body: JSON.stringify({ action: 'punchPA', date: ds2, name: currentEmp.name, dept: currentEmp.dept, type: type, time: t, overwrite: true }),
+              body: JSON.stringify({ action: 'punchPA', date: dateStr, name: currentEmp.name, dept: currentEmp.dept, type: type, time: t, overwrite: true }),
             }).catch(() => {});
           }
         }
@@ -491,19 +506,17 @@
 
     function punchYukyu() {
       if (!confirm('🌸 本日の有給休暇を申請しますか？')) return;
-      const d = new Date();
-      const dateStr = d.getFullYear() + '/' + String(d.getMonth()+1).padStart(2,'0') + '/' + String(d.getDate()).padStart(2,'0');
       fetch(GAS_URL, {
         method: 'POST', mode: 'cors',
         headers: { 'Content-Type': 'text/plain' },
-        body: JSON.stringify({ action: 'punchYukyu', name: currentEmp.name, dept: currentEmp.dept, date: dateStr }),
+        body: JSON.stringify({ action: 'punchYukyu', name: currentEmp.name, dept: currentEmp.dept, date: businessDateStr }),
       })
       .then(r => r.json())
       .then(res => {
         if (res.status === 'ok') {
           document.getElementById('done-icon').textContent  = '🌸';
           document.getElementById('done-title').textContent = '有給休暇を申請しました';
-          document.getElementById('done-time').textContent  = dateStr;
+          document.getElementById('done-time').textContent  = businessDateStr;
           showScreen('screen-done');
         } else {
           alert('エラー: ' + res.message);
@@ -512,7 +525,7 @@
       .catch(() => {
         document.getElementById('done-icon').textContent  = '🌸';
         document.getElementById('done-title').textContent = '有給休暇を申請しました';
-        document.getElementById('done-time').textContent  = dateStr;
+        document.getElementById('done-time').textContent  = businessDateStr;
         showScreen('screen-done');
       });
     }
@@ -520,13 +533,13 @@
     function showPunch() { showScreen('screen-punch'); }
 
     function showApply() {
-      const d = new Date();
-      const y = d.getFullYear(), m = String(d.getMonth()+1).padStart(2,'0'), day = String(d.getDate()).padStart(2,'0');
+      const bd = getBusinessDate();
+      const y = bd.getFullYear(), m = String(bd.getMonth()+1).padStart(2,'0'), day = String(bd.getDate()).padStart(2,'0');
       document.getElementById('apply-date').value = y + '-' + m + '-' + day;
       document.getElementById('apply-note').value = '';
       const sel = document.getElementById('apply-time');
       sel.innerHTML = '<option value="">-- 選択してください --</option>';
-      for (let h = 6; h <= 23; h++) {
+      for (let h = 5; h <= 26; h++) {
         for (let min = 0; min < 60; min += 15) {
           const opt = document.createElement('option');
           opt.value = String(h).padStart(2,'0') + ':' + String(min).padStart(2,'0');
@@ -555,9 +568,9 @@
       const dateVal = document.getElementById('apply-date').value;
       const timeVal = document.getElementById('apply-time').value;
       const note    = document.getElementById('apply-note').value;
-      if (!dateVal)       { alert('申請日を選択してください');   return; }
-      if (!timeVal)       { alert('希望時刻を選択してください'); return; }
-      if (!note.trim())   { alert('理由を入力してください');     return; }
+      if (!dateVal)     { alert('申請日を選択してください');   return; }
+      if (!timeVal)     { alert('希望時刻を選択してください'); return; }
+      if (!note.trim()) { alert('理由を入力してください');     return; }
       const dateStr = dateVal.replace(/-/g, '/');
       fetch(GAS_URL, {
         method: 'POST', mode: 'cors',
@@ -574,7 +587,7 @@
 
     function logout() {
       currentEmp = null; pinBuffer = ''; todayIn = null; todayOut = null;
-      prevDayNoOut = false; crossDayDate = null; selectedBreak = null;
+      prevDayNoOut = false; crossDayDate = null; selectedBreak = null; businessDateStr = '';
       document.getElementById('btn-yukyu').classList.remove('visible');
       document.getElementById('break-box').classList.remove('visible');
       updateDots();
@@ -583,10 +596,12 @@
     }
 
     function tick() {
-      const d = new Date();
-      document.getElementById('clock').textContent = d.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-      const wd = ['日','月','火','水','木','金','土'][d.getDay()];
-      document.getElementById('datestr').textContent = d.getFullYear() + ' / ' + String(d.getMonth()+1).padStart(2,'0') + ' / ' + String(d.getDate()).padStart(2,'0') + '（' + wd + '）';
+      const now = new Date();
+      document.getElementById('clock').textContent = now.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      // ★ 表示日付も業務日付（0〜4時は前日）
+      const bd = getBusinessDate();
+      const wd = ['日','月','火','水','木','金','土'][bd.getDay()];
+      document.getElementById('datestr').textContent = bd.getFullYear() + ' / ' + String(bd.getMonth()+1).padStart(2,'0') + ' / ' + String(bd.getDate()).padStart(2,'0') + '（' + wd + '）';
     }
     setInterval(tick, 1000); tick();
   </script>
