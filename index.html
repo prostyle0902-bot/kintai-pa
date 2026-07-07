@@ -78,6 +78,11 @@
     .result-title { font-size: 20px; font-weight: 600; color: var(--text-primary); margin-bottom: 6px; }
     .result-sub { font-size: 14px; color: var(--text-secondary); margin-bottom: 2rem; }
     .back-btn { padding: 11px 28px; border: 0.5px solid var(--border-md); border-radius: var(--radius-md); background: transparent; color: var(--text-primary); font-size: 14px; cursor: pointer; }
+    /* 現場選択ボタン */
+    .site-btn { width: 100%; padding: 20px; margin-bottom: 12px; border: 1.5px solid var(--border-md); border-radius: var(--radius-lg); background: #f9f9f7; font-size: 17px; font-weight: 600; color: var(--text-primary); cursor: pointer; transition: all 0.15s; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+    .site-btn:active { transform: scale(0.97); background: #ebebea; }
+    .site-btn.total-stay { border-color: #674ea7; color: #674ea7; background: #f0ecf8; }
+    .site-btn.kaiji { border-color: #0b5394; color: #0b5394; background: #e8f0fe; }
   </style>
 </head>
 <body>
@@ -111,6 +116,16 @@
           <button class="pin-btn zero" onclick="pinInput('0')">0</button>
           <button class="pin-btn" onclick="pinDel()">⌫</button>
         </div>
+      </div>
+    </div>
+
+    <!-- 現場選択画面（衣幡千明専用） -->
+    <div class="screen" id="screen-site">
+      <div class="card">
+        <div style="font-size:15px;font-weight:600;color:var(--text-primary);margin-bottom:6px;">衣幡千明 さん</div>
+        <div style="font-size:13px;color:var(--text-secondary);margin-bottom:1.5rem;">本日の現場を選んでください</div>
+        <button class="site-btn total-stay" onclick="selectSite('トータルステイ')">🏨 トータルステイ</button>
+        <button class="site-btn kaiji" onclick="selectSite('海事・横河')">⚓ 海事・横河</button>
       </div>
     </div>
 
@@ -216,7 +231,7 @@
       { pin: '3615', name: '長谷川碧里',  dept: 'トータルステイ',      locs: [{ lat: 35.9048, lng: 140.6358, name: 'トータルステイ', radius: 300 }] },
       { pin: '7924', name: '松本めぐみ',  dept: 'トータルステイ',      locs: [{ lat: 35.9048, lng: 140.6358, name: 'トータルステイ', radius: 300 }] },
       { pin: '6574', name: '田村あつ子',  dept: 'トータルステイ',      locs: [{ lat: 35.9048, lng: 140.6358, name: 'トータルステイ', radius: 300 }] },
-      { pin: '5552', name: '衣幡千明',    dept: 'トータルステイ',      locs: [{ lat: 35.9048, lng: 140.6358, name: 'トータルステイ', radius: 300 }] },
+      { pin: '5552', name: '衣幡千明',    dept: 'トータルステイ',      locs: null },
       { pin: '3547', name: '石川泰博',    dept: '市川東病院',          locs: [{ lat: 35.7034, lng: 139.9589, name: '市川東病院', radius: 300 }] },
       { pin: '4527', name: '山田明子',    dept: '市川東病院',          locs: [{ lat: 35.7034, lng: 139.9589, name: '市川東病院', radius: 300 }] },
       { pin: '6514', name: '伊藤美津子',  dept: '市川東病院',          locs: [{ lat: 35.7034, lng: 139.9589, name: '市川東病院', radius: 300 }] },
@@ -240,17 +255,20 @@
     const YUKYU_MEMBERS = ['河野千恵子','橋本房枝','山本里奈','長谷川碧里','松本めぐみ','田村あつ子','衣幡千明'];
     const BREAK_MEMBERS = ['八木秀子','籾山結泉','下河邊なお子','小堀真桜'];
 
+    // 8/16以降は現場選択が有効（それ以前はトータルステイ固定）
+    const SITE_SELECT_START = new Date('2026-08-16');
+
     let pinBuffer     = '';
     let currentEmp    = null;
+    let currentDept   = null; // 衣幡さんの現場選択結果
     let todayIn       = null;
     let todayOut      = null;
     let prevDayNoOut  = false;
     let crossDayDate  = null;
     let applyType     = '出勤';
     let selectedBreak = null;
-    let businessDateStr = ''; // 業務日付（5時基準）
+    let businessDateStr = '';
 
-    // ★ 業務時間の概念：0:00〜4:59は前日扱い
     function getBusinessDate() {
       const now = new Date();
       const h = now.getHours();
@@ -266,7 +284,6 @@
       return d.getFullYear() + '/' + String(d.getMonth()+1).padStart(2,'0') + '/' + String(d.getDate()).padStart(2,'0');
     }
 
-    // ★ 業務時刻文字列（0:00〜4:59は24:00〜28:59として返す）
     function getBusinessTimeStr(type) {
       const now = new Date();
       let h = now.getHours();
@@ -304,69 +321,87 @@
       const emp = employees.find(e => e.pin === pinBuffer);
       if (emp) {
         currentEmp = emp;
-        document.getElementById('emp-name').textContent = emp.name + ' さん';
-        document.getElementById('emp-dept-badge').textContent = emp.dept;
         todayIn = null; todayOut = null; prevDayNoOut = false; crossDayDate = null;
         selectedBreak = null;
-        document.getElementById('btn-in').disabled = false;
-        document.getElementById('btn-out').disabled = false;
-
-        // 有給ボタン表示制御
-        const yukyuBtn = document.getElementById('btn-yukyu');
-        if (YUKYU_MEMBERS.includes(emp.name)) {
-          yukyuBtn.classList.add('visible');
-        } else {
-          yukyuBtn.classList.remove('visible');
-        }
-
-        // 休憩ボタン表示制御
-        const breakBox = document.getElementById('break-box');
-        if (BREAK_MEMBERS.includes(emp.name)) {
-          breakBox.classList.add('visible');
-          document.getElementById('break-selected').textContent = '';
-          document.querySelectorAll('.break-btn').forEach(b => b.classList.remove('selected'));
-        } else {
-          breakBox.classList.remove('visible');
-        }
-
-        updateStatus();
-        showScreen('screen-punch');
-
-        // ★ 業務日付を取得（0〜4時なら前日）
         businessDateStr = getDateStr(getBusinessDate());
 
-        fetch(GAS_URL, {
-          method: 'POST', mode: 'cors',
-          headers: { 'Content-Type': 'text/plain' },
-          body: JSON.stringify({ action: 'getStatusPA', name: emp.name, date: businessDateStr }),
-        })
-        .then(r => r.json())
-        .then(res => {
-          if (res.status === 'ok') {
-            if (res.inTime)  { todayIn  = res.inTime;  document.getElementById('btn-in').disabled  = true; }
-            if (res.outTime) { todayOut = res.outTime; document.getElementById('btn-out').disabled = true; }
-            prevDayNoOut = res.prevDayNoOut || false;
-            if (res.crossDay && !res.inTime) {
-              crossDayDate = res.crossDayDate;
-              document.getElementById('btn-in').disabled  = true;
-              document.getElementById('btn-out').disabled = false;
-            }
-            if (res.breakTime && BREAK_MEMBERS.includes(emp.name)) {
-              selectedBreak = res.breakTime;
-              document.getElementById('break-selected').textContent = '現在の設定: ' + res.breakTime + '分';
-              document.querySelectorAll('.break-btn').forEach(b => {
-                b.classList.toggle('selected', parseInt(b.textContent) === res.breakTime);
-              });
-            }
-            updateStatus();
-          }
-        })
-        .catch(() => {});
+        // ★ 衣幡千明かつ8/16以降なら現場選択画面へ
+        if (emp.name === '衣幡千明' && new Date() >= SITE_SELECT_START) {
+          showScreen('screen-site');
+          return;
+        }
+
+        // 通常スタッフはそのまま打刻画面へ
+        currentDept = emp.dept;
+        loadPunchScreen();
       } else {
         document.getElementById('pin-error').textContent = 'PINコードが違います';
         pinBuffer = '';
         updateDots();
       }
+    }
+
+    // ★ 現場選択（衣幡千明専用）
+    function selectSite(site) {
+      currentDept = site;
+      loadPunchScreen();
+    }
+
+    function loadPunchScreen() {
+      document.getElementById('emp-name').textContent = currentEmp.name + ' さん';
+      document.getElementById('emp-dept-badge').textContent = currentDept;
+      document.getElementById('btn-in').disabled = false;
+      document.getElementById('btn-out').disabled = false;
+
+      // 有給ボタン表示制御
+      const yukyuBtn = document.getElementById('btn-yukyu');
+      if (YUKYU_MEMBERS.includes(currentEmp.name)) {
+        yukyuBtn.classList.add('visible');
+      } else {
+        yukyuBtn.classList.remove('visible');
+      }
+
+      // 休憩ボタン表示制御
+      const breakBox = document.getElementById('break-box');
+      if (BREAK_MEMBERS.includes(currentEmp.name)) {
+        breakBox.classList.add('visible');
+        document.getElementById('break-selected').textContent = '';
+        document.querySelectorAll('.break-btn').forEach(b => b.classList.remove('selected'));
+      } else {
+        breakBox.classList.remove('visible');
+      }
+
+      updateStatus();
+      showScreen('screen-punch');
+
+      // GASからステータス取得
+      fetch(GAS_URL, {
+        method: 'POST', mode: 'cors',
+        headers: { 'Content-Type': 'text/plain' },
+        body: JSON.stringify({ action: 'getStatusPA', name: currentEmp.name, date: businessDateStr, dept: currentDept }),
+      })
+      .then(r => r.json())
+      .then(res => {
+        if (res.status === 'ok') {
+          if (res.inTime)  { todayIn  = res.inTime;  document.getElementById('btn-in').disabled  = true; }
+          if (res.outTime) { todayOut = res.outTime; document.getElementById('btn-out').disabled = true; }
+          prevDayNoOut = res.prevDayNoOut || false;
+          if (res.crossDay && !res.inTime) {
+            crossDayDate = res.crossDayDate;
+            document.getElementById('btn-in').disabled  = true;
+            document.getElementById('btn-out').disabled = false;
+          }
+          if (res.breakTime && BREAK_MEMBERS.includes(currentEmp.name)) {
+            selectedBreak = res.breakTime;
+            document.getElementById('break-selected').textContent = '現在の設定: ' + res.breakTime + '分';
+            document.querySelectorAll('.break-btn').forEach(b => {
+              b.classList.toggle('selected', parseInt(b.textContent) === res.breakTime);
+            });
+          }
+          updateStatus();
+        }
+      })
+      .catch(() => {});
     }
 
     function selectBreak(minutes) {
@@ -452,13 +487,11 @@
     }
 
     function doPunch(type, geoInfo) {
-      // ★ 業務時刻を使う（0〜4時は24〜28時台）
       const t = getBusinessTimeStr(type);
 
       if (type === '出勤') {
         todayIn = t;
         document.getElementById('btn-in').disabled = true;
-        // ★ 出勤打刻時の業務日付を固定
         businessDateStr = getDateStr(getBusinessDate());
       } else {
         todayOut = t;
@@ -471,7 +504,6 @@
       document.getElementById('done-icon').textContent  = type === '出勤' ? '✅' : '🏁';
       showScreen('screen-done');
 
-      // ★ 日付は businessDateStr（出勤した業務日付）を使う
       const dateStr = (type === '退勤' && crossDayDate) ? crossDayDate : businessDateStr;
 
       fetch(GAS_URL, {
@@ -481,7 +513,7 @@
           action: 'punchPA',
           date: dateStr,
           name: currentEmp.name,
-          dept: currentEmp.dept,
+          dept: currentDept, // ★ 現場選択結果を使う
           type: type,
           time: t,
           lat:   geoInfo ? geoInfo.lat   : null,
@@ -496,7 +528,7 @@
             fetch(GAS_URL, {
               method: 'POST', mode: 'cors',
               headers: { 'Content-Type': 'text/plain' },
-              body: JSON.stringify({ action: 'punchPA', date: dateStr, name: currentEmp.name, dept: currentEmp.dept, type: type, time: t, overwrite: true }),
+              body: JSON.stringify({ action: 'punchPA', date: dateStr, name: currentEmp.name, dept: currentDept, type: type, time: t, overwrite: true }),
             }).catch(() => {});
           }
         }
@@ -509,7 +541,7 @@
       fetch(GAS_URL, {
         method: 'POST', mode: 'cors',
         headers: { 'Content-Type': 'text/plain' },
-        body: JSON.stringify({ action: 'punchYukyu', name: currentEmp.name, dept: currentEmp.dept, date: businessDateStr }),
+        body: JSON.stringify({ action: 'punchYukyu', name: currentEmp.name, dept: currentDept, date: businessDateStr }),
       })
       .then(r => r.json())
       .then(res => {
@@ -575,7 +607,7 @@
       fetch(GAS_URL, {
         method: 'POST', mode: 'cors',
         headers: { 'Content-Type': 'text/plain' },
-        body: JSON.stringify({ action: 'apply', name: currentEmp.name, dept: currentEmp.dept, date: dateStr, type: applyType, time: timeVal, note: note }),
+        body: JSON.stringify({ action: 'apply', name: currentEmp.name, dept: currentDept, date: dateStr, type: applyType, time: timeVal, note: note }),
       })
       .then(r => r.json())
       .then(res => {
@@ -586,7 +618,7 @@
     }
 
     function logout() {
-      currentEmp = null; pinBuffer = ''; todayIn = null; todayOut = null;
+      currentEmp = null; currentDept = null; pinBuffer = ''; todayIn = null; todayOut = null;
       prevDayNoOut = false; crossDayDate = null; selectedBreak = null; businessDateStr = '';
       document.getElementById('btn-yukyu').classList.remove('visible');
       document.getElementById('break-box').classList.remove('visible');
@@ -598,7 +630,6 @@
     function tick() {
       const now = new Date();
       document.getElementById('clock').textContent = now.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-      // ★ 表示日付も業務日付（0〜4時は前日）
       const bd = getBusinessDate();
       const wd = ['日','月','火','水','木','金','土'][bd.getDay()];
       document.getElementById('datestr').textContent = bd.getFullYear() + ' / ' + String(bd.getMonth()+1).padStart(2,'0') + ' / ' + String(bd.getDate()).padStart(2,'0') + '（' + wd + '）';
