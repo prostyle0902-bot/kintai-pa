@@ -76,7 +76,7 @@
     .result-card { background: var(--surface); border-radius: var(--radius-lg); border: 0.5px solid var(--border); padding: 2.5rem 1.5rem; text-align: center; }
     .result-icon { font-size: 52px; margin-bottom: 1rem; }
     .result-title { font-size: 20px; font-weight: 600; color: var(--text-primary); margin-bottom: 6px; }
-    .result-sub { font-size: 14px; color: var(--text-secondary); margin-bottom: 2rem; }
+    .result-sub { font-size: 14px; color: var(--text-secondary); margin-bottom: 2rem; white-space: pre-line; line-height: 1.7; }
     .back-btn { padding: 11px 28px; border: 0.5px solid var(--border-md); border-radius: var(--radius-md); background: transparent; color: var(--text-primary); font-size: 14px; cursor: pointer; }
     /* 現場選択ボタン */
     .site-btn { width: 100%; padding: 20px; margin-bottom: 12px; border: 1.5px solid var(--border-md); border-radius: var(--radius-lg); background: #f9f9f7; font-size: 17px; font-weight: 600; color: var(--text-primary); cursor: pointer; transition: all 0.15s; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
@@ -172,6 +172,7 @@
         <div class="result-icon" id="done-icon">✅</div>
         <div class="result-title" id="done-title"></div>
         <div class="result-sub" id="done-time"></div>
+        <button class="back-btn" id="done-apply" style="display:none;margin-bottom:8px;background:var(--accent);color:#fff;border:none;" onclick="showApply()">打刻忘れ申請へ</button>
         <button class="back-btn" onclick="showPunch()">戻る</button>
       </div>
     </div>
@@ -270,6 +271,65 @@
     let applyType     = '出勤';
     let selectedBreak = null;
     let businessDateStr = '';
+
+    // 送信できなかった打刻を預かっておく場所（電波が悪い現場のため）
+    const PENDING_KEY = 'pa_pending_punch_v1';
+    const PENDING_KEEP = 3 * 24 * 60 * 60 * 1000;   // 3日を過ぎたものは捨てる
+
+    /* GASへ送る共通処理。
+       つながらなかったときは少し待って1回だけ送り直す。 */
+    function postGas(body, tries) {
+      tries = (tries === undefined) ? 2 : tries;
+      return fetch(GAS_URL, {
+        method: 'POST', mode: 'cors',
+        headers: { 'Content-Type': 'text/plain' },
+        body: JSON.stringify(body),
+      })
+      .then(r => r.json())
+      .catch(err => {
+        if (tries > 1) {
+          return new Promise(r => setTimeout(r, 1500)).then(() => postGas(body, tries - 1));
+        }
+        throw err;
+      });
+    }
+
+    function loadPending() {
+      try { return JSON.parse(localStorage.getItem(PENDING_KEY) || '[]'); } catch (e) { return []; }
+    }
+    function storePending(list) {
+      try { localStorage.setItem(PENDING_KEY, JSON.stringify(list)); } catch (e) {}
+    }
+    function addPending(body) {
+      const list = loadPending().filter(x => x.savedAt > Date.now() - PENDING_KEEP);
+      list.push({ savedAt: Date.now(), body: body });
+      storePending(list);
+    }
+
+    // 前に送れなかった打刻を、つながったときに送り直す
+    function flushPending(done) {
+      const list = loadPending();
+      if (!list.length) { if (done) done(0); return; }
+      const rest = [];
+      let sent = 0;
+      const step = function (i) {
+        if (i >= list.length) { storePending(rest); if (done) done(sent); return; }
+        const it = list[i];
+        if (!it || it.savedAt < Date.now() - PENDING_KEEP) { step(i + 1); return; }
+        postGas(it.body, 1)
+          .then(() => { sent++; step(i + 1); })
+          .catch(() => { rest.push(it); step(i + 1); });
+      };
+      step(0);
+    }
+
+    function showResult(icon, title, sub, withApply) {
+      document.getElementById('done-icon').textContent  = icon;
+      document.getElementById('done-title').textContent = title;
+      document.getElementById('done-time').textContent  = sub;
+      document.getElementById('done-apply').style.display = withApply ? '' : 'none';
+      showScreen('screen-done');
+    }
 
     function getBusinessDate() {
       const now = new Date();
@@ -376,13 +436,17 @@
       updateStatus();
       showScreen('screen-punch');
 
-      // GASからステータス取得
-      fetch(GAS_URL, {
-        method: 'POST', mode: 'cors',
-        headers: { 'Content-Type': 'text/plain' },
-        body: JSON.stringify({ action: 'getStatusPA', name: currentEmp.name, date: businessDateStr, dept: currentDept }),
-      })
-      .then(r => r.json())
+      // 前に送れなかった打刻があれば、まず送り直してから状況を取り直す
+      flushPending(function (n) {
+        if (n) alert('📨 送信できていなかった打刻 ' + n + '件を送信しました。');
+        refreshStatus();
+      });
+    }
+
+    // GASから今日の打刻状況を取り直す
+    function refreshStatus() {
+      if (!currentEmp) return;
+      postGas({ action: 'getStatusPA', name: currentEmp.name, date: businessDateStr, dept: currentDept }, 1)
       .then(res => {
         if (res.status === 'ok') {
           if (res.inTime)  { todayIn  = res.inTime;  document.getElementById('btn-in').disabled  = true; }
@@ -403,7 +467,11 @@
           updateStatus();
         }
       })
-      .catch(() => {});
+      .catch(() => {
+        // 状況が取れなくても打刻はできる。ただし取れていないことは知らせる
+        document.getElementById('st-in').textContent  = '確認できません';
+        document.getElementById('st-out').textContent = '確認できません';
+      });
     }
 
     function selectBreak(minutes) {
@@ -412,16 +480,11 @@
       document.querySelectorAll('.break-btn').forEach(b => {
         b.classList.toggle('selected', parseInt(b.textContent) === minutes);
       });
-      fetch(GAS_URL, {
-        method: 'POST', mode: 'cors',
-        headers: { 'Content-Type': 'text/plain' },
-        body: JSON.stringify({ action: 'setBreak', name: currentEmp.name, date: businessDateStr, breakTime: minutes }),
-      })
-      .then(r => r.json())
+      postGas({ action: 'setBreak', name: currentEmp.name, date: businessDateStr, breakTime: minutes })
       .then(res => {
-        if (res.status !== 'ok') alert('休憩時間の保存に失敗しました');
+        if (res && res.status === 'error') alert('休憩時間を保存できませんでした：' + (res.message || ''));
       })
-      .catch(() => {});
+      .catch(() => { alert('⚠️ 通信できませんでした。休憩時間は保存されていません。'); });
     }
 
     function showScreen(id) {
@@ -490,77 +553,90 @@
 
     function doPunch(type, geoInfo) {
       const t = getBusinessTimeStr(type);
+      const dateStr = (type === '退勤' && crossDayDate) ? crossDayDate : getDateStr(getBusinessDate());
+      const body = {
+        action: 'punchPA',
+        date: dateStr,
+        name: currentEmp.name,
+        dept: currentDept, // ★ 現場選択結果を使う
+        type: type,
+        time: t,
+        lat:   geoInfo ? geoInfo.lat   : null,
+        lng:   geoInfo ? geoInfo.lng   : null,
+        place: geoInfo ? geoInfo.place : 'フリー',
+      };
 
+      // 送り終わるまでは「記録しました」と言わない
+      document.getElementById('btn-in').disabled  = true;
+      document.getElementById('btn-out').disabled = true;
+      showResult('⏳', '送信中…', type + ' ' + t + ' を記録しています。\nそのままお待ちください。');
+
+      postGas(body)
+        .then(res => {
+          if (res && res.status === 'duplicate') {
+            if (!confirm('⚠️ ' + res.message + '\n上書きしますか？')) {
+              punchFailed(type, t, 'この打刻は登録していません。', false);
+              return;
+            }
+            const again = {};
+            Object.keys(body).forEach(k => { again[k] = body[k]; });
+            again.overwrite = true;
+            return postGas(again).then(r2 => punchDone(type, t, r2));
+          }
+          punchDone(type, t, res);
+        })
+        .catch(() => {
+          // つながらなかったぶんは預かって、次に開いたときに送り直す
+          addPending(body);
+          punchFailed(type, t,
+            '通信できませんでした。打刻はまだ登録されていません。\n'
+            + '電波の届くところでもう一度開くと自動で送り直します。\n'
+            + '急ぐときは「打刻忘れ申請」をしてください。', true);
+        });
+    }
+
+    // 送信できたときだけ、記録済みとして扱う
+    function punchDone(type, t, res) {
+      if (res && res.status === 'error') {
+        punchFailed(type, t, (res.message || '記録できませんでした')
+          + '\n打刻は登録されていません。管理者に連絡してください。', true);
+        return;
+      }
       if (type === '出勤') {
         todayIn = t;
-        document.getElementById('btn-in').disabled = true;
         businessDateStr = getDateStr(getBusinessDate());
+        document.getElementById('btn-in').disabled  = true;
+        document.getElementById('btn-out').disabled = false;
       } else {
         todayOut = t;
         document.getElementById('btn-out').disabled = true;
       }
-
       updateStatus();
-      document.getElementById('done-title').textContent = type + 'を記録しました';
-      document.getElementById('done-time').textContent  = '記録時刻: ' + t;
-      document.getElementById('done-icon').textContent  = type === '出勤' ? '✅' : '🏁';
-      showScreen('screen-done');
+      showResult(type === '出勤' ? '✅' : '🏁', type + 'を記録しました', '記録時刻: ' + t, false);
+    }
 
-      const dateStr = (type === '退勤' && crossDayDate) ? crossDayDate : businessDateStr;
-
-      fetch(GAS_URL, {
-        method: 'POST', mode: 'cors',
-        headers: { 'Content-Type': 'text/plain' },
-        body: JSON.stringify({
-          action: 'punchPA',
-          date: dateStr,
-          name: currentEmp.name,
-          dept: currentDept, // ★ 現場選択結果を使う
-          type: type,
-          time: t,
-          lat:   geoInfo ? geoInfo.lat   : null,
-          lng:   geoInfo ? geoInfo.lng   : null,
-          place: geoInfo ? geoInfo.place : 'フリー',
-        }),
-      })
-      .then(r => r.json())
-      .then(res => {
-        if (res.status === 'duplicate') {
-          if (confirm('⚠️ ' + res.message + '\n上書きしますか？')) {
-            fetch(GAS_URL, {
-              method: 'POST', mode: 'cors',
-              headers: { 'Content-Type': 'text/plain' },
-              body: JSON.stringify({ action: 'punchPA', date: dateStr, name: currentEmp.name, dept: currentDept, type: type, time: t, overwrite: true }),
-            }).catch(() => {});
-          }
-        }
-      })
-      .catch(() => {});
+    function punchFailed(type, t, msg, withApply) {
+      // 押せる状態に戻す（記録できていないので、もう一度押せるようにする）
+      document.getElementById('btn-in').disabled  = !!todayIn;
+      document.getElementById('btn-out').disabled = !!todayOut;
+      updateStatus();
+      showResult('⚠️', type + 'を記録できませんでした', msg, withApply !== false);
     }
 
     function punchYukyu() {
       if (!confirm('🌸 本日の有給休暇を申請しますか？')) return;
-      fetch(GAS_URL, {
-        method: 'POST', mode: 'cors',
-        headers: { 'Content-Type': 'text/plain' },
-        body: JSON.stringify({ action: 'punchYukyu', name: currentEmp.name, dept: currentDept, date: businessDateStr }),
-      })
-      .then(r => r.json())
+      postGas({ action: 'punchYukyu', name: currentEmp.name, dept: currentDept, date: businessDateStr })
       .then(res => {
-        if (res.status === 'ok') {
-          document.getElementById('done-icon').textContent  = '🌸';
-          document.getElementById('done-title').textContent = '有給休暇を申請しました';
-          document.getElementById('done-time').textContent  = businessDateStr;
-          showScreen('screen-done');
-        } else {
-          alert('エラー: ' + res.message);
+        if (res && res.status === 'error') {
+          showResult('⚠️', '有給休暇を申請できませんでした',
+            (res.message || '') + '\n管理者に連絡してください。', false);
+          return;
         }
+        showResult('🌸', '有給休暇を申請しました', businessDateStr, false);
       })
       .catch(() => {
-        document.getElementById('done-icon').textContent  = '🌸';
-        document.getElementById('done-title').textContent = '有給休暇を申請しました';
-        document.getElementById('done-time').textContent  = businessDateStr;
-        showScreen('screen-done');
+        showResult('⚠️', '有給休暇を申請できませんでした',
+          '通信できませんでした。申請は送られていません。\n電波の届くところでもう一度お試しください。', false);
       });
     }
 
@@ -606,17 +682,15 @@
       if (!timeVal)     { alert('希望時刻を選択してください'); return; }
       if (!note.trim()) { alert('理由を入力してください');     return; }
       const dateStr = dateVal.replace(/-/g, '/');
-      fetch(GAS_URL, {
-        method: 'POST', mode: 'cors',
-        headers: { 'Content-Type': 'text/plain' },
-        body: JSON.stringify({ action: 'apply', name: currentEmp.name, dept: currentDept, date: dateStr, type: applyType, time: timeVal, note: note }),
-      })
-      .then(r => r.json())
+      postGas({ action: 'apply', name: currentEmp.name, dept: currentDept, date: dateStr, type: applyType, time: timeVal, note: note })
       .then(res => {
-        if (res.status === 'ok') { alert('✅ 申請を送信しました'); showPunch(); }
-        else { alert('エラー: ' + res.message); }
+        if (res && res.status === 'error') { alert('エラー: ' + (res.message || '申請できませんでした')); return; }
+        alert('✅ 申請を送信しました');
+        showPunch();
       })
-      .catch(() => { alert('✅ 申請を送信しました'); showPunch(); });
+      .catch(() => {
+        alert('⚠️ 通信できませんでした。申請は送られていません。\n電波の届くところでもう一度お試しください。');
+      });
     }
 
     function logout() {
