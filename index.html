@@ -162,6 +162,7 @@
         </div>
         <button class="yukyu-btn" id="btn-yukyu" onclick="punchYukyu()">🌸 有給休暇を申請する</button>
         <button class="apply-btn" onclick="showApply()">打刻忘れ申請</button>
+        <button class="logout-btn" onclick="runCheck()">接続を確認</button>
         <button class="logout-btn" onclick="logout()">ログアウト</button>
       </div>
     </div>
@@ -321,6 +322,34 @@
           .catch(() => { rest.push(it); step(i + 1); });
       };
       step(0);
+    }
+
+    // 管理者向け：どこで止まっているかを1画面で見る
+    function runCheck() {
+      const dev = new Date();
+      const lines = [];
+      lines.push('■ 端末の日時（今の時刻と合っていますか？）');
+      lines.push('　' + dev.toLocaleString('ja-JP'));
+      lines.push('■ 打刻を入れる日付');
+      lines.push('　' + getDateStr(getBusinessDate()));
+      lines.push('■ 名前 / 現場');
+      lines.push('　' + (currentEmp ? currentEmp.name : '-') + ' / ' + (currentDept || '-'));
+      lines.push('■ 送信できていない打刻');
+      lines.push('　' + loadPending().length + '件');
+
+      postGas({ action: 'getStatusPA', name: currentEmp.name, date: businessDateStr, dept: currentDept }, 1)
+        .then(res => {
+          lines.push('■ 通信');
+          lines.push('　OK');
+          lines.push('■ サーバーの返事');
+          lines.push('　' + JSON.stringify(res));
+          alert(lines.join('\n'));
+        })
+        .catch(e => {
+          lines.push('■ 通信');
+          lines.push('　つながりません（' + ((e && e.message) || '原因不明') + '）');
+          alert(lines.join('\n'));
+        });
     }
 
     function showResult(icon, title, sub, withApply) {
