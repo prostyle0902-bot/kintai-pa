@@ -406,12 +406,39 @@
         headers: { 'Content-Type': 'text/plain' },
         body: JSON.stringify(body),
       })
-      .then(r => r.json())
+      .then(readGas)
       .catch(err => {
         if (tries > 1) {
           return new Promise(r => setTimeout(r, 1500)).then(() => postGas(body, tries - 1));
         }
         throw err;
+      });
+    }
+
+    /* 失敗した理由を、そのまま出しても分かる言い方にする */
+    function gasReason(err) {
+      var m = (err && err.message) ? String(err.message) : '';
+      if (!m) return '通信エラー';
+      if (/Failed to fetch|NetworkError|Load failed|network/i.test(m)) {
+        return '電波が届いていないようです';
+      }
+      return m;
+    }
+
+    /* 返ってきた中身を読む。
+       Apps Script は、うまくいかないときJSONではなくGoogleの画面（HTML）を返す。
+       そのまま読むと「Unexpected token '<'」という分かりにくい文言になるので、
+       何が返ってきたのかが伝わる言い方にする。 */
+    function readGas(r) {
+      return r.text().then(function (t) {
+        try { return JSON.parse(t); } catch (e) {
+          if (/^\s*</.test(t)) {
+            throw new Error(/ログイン|Sign in|承認|authorization/i.test(t)
+              ? 'Apps Script が許可を求めています（デプロイの設定を確認してください）'
+              : 'Apps Script からエラーの画面が返りました');
+          }
+          throw new Error('返事の中身が読めませんでした');
+        }
       });
     }
 
@@ -734,11 +761,12 @@
           }
           punchDone(type, t, res);
         })
-        .catch(() => {
+        .catch(err => {
           // つながらなかったぶんは預かって、次に開いたときに送り直す
           addPending(body);
           punchFailed(type, t,
-            '通信できませんでした。打刻はまだ登録されていません。\n'
+            '送れませんでした：' + gasReason(err) + '\n'
+            + '打刻はまだ登録されていません。\n'
             + '電波の届くところでもう一度開くと自動で送り直します。\n'
             + '急ぐときは「打刻忘れ申請」をしてください。', true);
         });
