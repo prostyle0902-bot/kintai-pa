@@ -103,7 +103,7 @@
         <span class="logo-div"></span>
         <span class="logo-title">PA勤怠</span>
       </div>
-      <div class="logo-sub">パート・アルバイト専用<span style="opacity:.55;margin-left:.5em">版 2026-09-13a</span></div>
+      <div class="logo-sub">パート・アルバイト専用<span style="opacity:.55;margin-left:.5em">版 2026-10-06a</span></div>
     </div>
 
     <!-- PIN入力画面 -->
@@ -229,7 +229,7 @@
      { pin: '3286', name: '山﨑悠人', dept: 'バッシング', locs: [{ lat: 35.8998, lng: 140.6404, name: '神栖横丁', radius: 300 }, { lat: 35.990552, lng: 140.638966, name: 'ビアガーデン', radius: 300 }] },
       { pin: '2679', name: '本田光江',    dept: 'バッシング',          locs: [{ lat: 35.8998, lng: 140.6404, name: '神栖横丁', radius: 300 }] },
       { pin: '9935', name: '橋本桂子',    dept: '横丁清掃',            locs: [{ lat: 35.8998, lng: 140.6404, name: '神栖横丁', radius: 300 }] },
-      { pin: '2424', name: '小金澤登美',  dept: '横丁清掃',            locs: [{ lat: 35.8998, lng: 140.6404, name: '神栖横丁', radius: 300 }] },
+      { pin: '2424', name: '小金澤登美江',  dept: '横丁清掃',            locs: [{ lat: 35.8998, lng: 140.6404, name: '神栖横丁', radius: 300 }] },
       { pin: '7912', name: '綱代愛',      dept: 'りゅうちゃん',        locs: [{ lat: 35.8998, lng: 140.6404, name: '神栖横丁', radius: 300 }] },
       { pin: '1520', name: '新河美和',    dept: 'りゅうちゃん',        locs: [{ lat: 35.8998, lng: 140.6404, name: '神栖横丁', radius: 300 }] },
       { pin: '1488', name: '飯塚利恵',    dept: 'りゅうちゃん',        locs: [{ lat: 35.8998, lng: 140.6404, name: '神栖横丁', radius: 300 }] },
@@ -301,7 +301,11 @@
         const emp = { pin: String(rec.pin || ''), name: name, dept: String(rec.dept || ''), locs: locs };
         if (!emp.pin) return;                       // PINが無い人はログインできないので入れない
 
-        const i = out.findIndex(e => e.name === name);
+        /* 同じ人かどうかは、まずPINで見る。
+           名前で照らし合わせていると、名簿で氏名を直したときに別人として増えてしまい、
+           同じPINが2つ並んで、先にある古い名前のほうでログインしてしまう。 */
+        let i = out.findIndex(e => e.pin === emp.pin);
+        if (i < 0) i = out.findIndex(e => e.name === name);
         if (i >= 0) out[i] = emp; else out.push(emp);
       });
 
